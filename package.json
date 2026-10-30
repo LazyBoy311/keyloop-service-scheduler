@@ -1,0 +1,22 @@
+{
+  "name": "keyloop-service-scheduler",
+  "version": "1.0.0",
+  "description": "Unified Service Scheduler - backend for dealership service appointment booking",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.ts",
+    "dev": "node --disable-warning=ExperimentalWarning --watch src/server.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "fastify": "^5.12.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}

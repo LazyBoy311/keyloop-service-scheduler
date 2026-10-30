@@ -1,0 +1,164 @@
+openapi: 3.1.0
+info:
+  title: Unified Service Scheduler API
+  version: 1.0.0
+  description: Books dealership service appointments, guaranteeing a free service bay and a qualified technician for the whole service duration.
+servers:
+  - url: http://localhost:3000
+paths:
+  /dealerships/{id}/availability:
+    get:
+      summary: Check whether a service can be booked at a given start time
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, example: dlr-hcm }
+        - { name: serviceTypeId, in: query, required: true, schema: { type: string }, example: svc-brake }
+        - { name: startAt, in: query, required: true, schema: { type: string, format: date-time }, example: '2030-03-04T09:00:00+07:00' }
+      responses:
+        '200':
+          description: Free technicians and bays for the whole window
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Availability' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /appointments:
+    post:
+      summary: Book an appointment (atomic availability check + reservation)
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Retrying with the same key returns the original appointment (200) instead of booking twice.
+          schema: { type: string, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BookingRequest' }
+      responses:
+        '201':
+          description: Appointment confirmed
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Appointment' }
+        '200':
+          description: Idempotent replay of an earlier successful booking
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Appointment' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409':
+          description: 'No resource free: NO_TECHNICIAN_AVAILABLE, NO_BAY_AVAILABLE, VEHICLE_ALREADY_BOOKED, SLOT_TAKEN'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: 'Business rule violated: OUTSIDE_OPENING_HOURS, NO_QUALIFIED_TECHNICIAN'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    get:
+      summary: List a dealership's appointments
+      parameters:
+        - { name: dealershipId, in: query, required: true, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: Appointments ordered by start time
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Appointment' } }
+  /appointments/{id}:
+    get:
+      summary: Get an appointment
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Appointment' }
+          description: The appointment
+        '404': { $ref: '#/components/responses/Error' }
+  /appointments/{id}/cancel:
+    post:
+      summary: Cancel an appointment, releasing its technician and bay
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The cancelled appointment (idempotent)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Appointment' }
+        '404': { $ref: '#/components/responses/Error' }
+  /dealerships:
+    get: { summary: List dealerships, responses: { '200': { description: Dealerships } } }
+  /service-types:
+    get: { summary: List service types with duration and required skill, responses: { '200': { description: Service types } } }
+  /vehicles:
+    get: { summary: List vehicles, responses: { '200': { description: Vehicles } } }
+  /health:
+    get: { summary: Liveness and database check, responses: { '200': { description: OK } } }
+  /metrics:
+    get: { summary: Prometheus metrics, responses: { '200': { description: Prometheus text format } } }
+components:
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    BookingRequest:
+      type: object
+      additionalProperties: false
+      required: [dealershipId, vehicleId, serviceTypeId, startAt]
+      properties:
+        dealershipId: { type: string, example: dlr-hcm }
+        vehicleId: { type: string, example: veh-1 }
+        serviceTypeId: { type: string, example: svc-brake }
+        startAt: { type: string, format: date-time, example: '2030-03-04T09:00:00+07:00', description: 'Future, on a 15-minute boundary, inside opening hours' }
+    Ref:
+      type: object
+      properties: { id: { type: string }, name: { type: string } }
+    Availability:
+      type: object
+      properties:
+        available: { type: boolean }
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+        technicians: { type: array, items: { $ref: '#/components/schemas/Ref' } }
+        serviceBays: { type: array, items: { $ref: '#/components/schemas/Ref' } }
+    Appointment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [CONFIRMED, CANCELLED] }
+        dealershipId: { type: string }
+        customer: { $ref: '#/components/schemas/Ref' }
+        vehicle:
+          type: object
+          properties: { id: { type: string }, vin: { type: string }, make: { type: string }, model: { type: string } }
+        serviceType:
+          type: object
+          properties: { id: { type: string }, name: { type: string }, durationMinutes: { type: integer } }
+        technician: { $ref: '#/components/schemas/Ref' }
+        serviceBay: { $ref: '#/components/schemas/Ref' }
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        cancelledAt: { type: [string, 'null'], format: date-time }
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: NO_TECHNICIAN_AVAILABLE }
+            message: { type: string }
