@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Service Scheduler</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --text: #1c2330; --muted: #667085; --line: #e4e7ec;
+    --accent: #1570ef; --accent-soft: #e8f1ff; --ok: #067647; --ok-soft: #e7f6ee;
+    --err: #b42318; --err-soft: #fdecea; --block: #1570ef; --block-text: #fff; --window: rgba(21, 112, 239, .14);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1218; --panel: #171b23; --text: #e6e9ef; --muted: #98a2b3; --line: #2a303b;
+      --accent: #5b9bff; --accent-soft: #1b2a44; --ok: #4ade80; --ok-soft: #13291d;
+      --err: #f87171; --err-soft: #2e1717; --block: #3b7be8; --block-text: #fff; --window: rgba(91, 155, 255, .18);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 16px 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { margin: 0; font-size: 18px; }
+  header p { margin: 2px 0 0; color: var(--muted); }
+  main { display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 16px 24px; max-width: 1400px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+  h2 { font-size: 15px; margin: 0 0 12px; }
+  label { display: block; font-weight: 600; margin: 10px 0 4px; }
+  select, input { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); font: inherit; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .buttons { display: flex; gap: 8px; margin-top: 14px; }
+  button { flex: 1; padding: 9px 12px; border-radius: 6px; border: 1px solid var(--accent); background: var(--panel); color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; }
+  button.small { flex: none; padding: 3px 8px; font-size: 12px; border-color: var(--line); color: var(--muted); }
+  button:disabled { opacity: .5; cursor: default; }
+  .result { margin-top: 14px; padding: 10px 12px; border-radius: 6px; display: none; }
+  .result.ok { display: block; background: var(--ok-soft); color: var(--ok); }
+  .result.err { display: block; background: var(--err-soft); color: var(--err); }
+  .result code { font-weight: 700; }
+  .stack { display: grid; gap: 16px; min-width: 0; }
+  .timeline { position: relative; }
+  .hours, .lane { display: grid; grid-template-columns: 170px 1fr; align-items: center; }
+  .hours .scale { position: relative; height: 18px; color: var(--muted); font-size: 11px; }
+  .hours .scale span { position: absolute; transform: translateX(-50%); }
+  .hours .scale span:first-child { transform: none; }
+  .hours .scale span:last-child { transform: translateX(-100%); }
+  .lane { border-top: 1px solid var(--line); min-height: 40px; }
+  .lane .name { padding-right: 8px; font-weight: 600; font-size: 13px; }
+  .lane .name small { display: block; font-weight: 400; color: var(--muted); }
+  .track { position: relative; height: 40px; background-image: linear-gradient(to right, var(--line) 1px, transparent 1px); background-size: calc(100% / 9) 100%; }
+  .block { position: absolute; top: 6px; bottom: 6px; border-radius: 4px; background: var(--block); color: var(--block-text); font-size: 11px; padding: 2px 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .window { position: absolute; top: 0; bottom: 0; background: var(--window); border-left: 2px dashed var(--accent); border-right: 2px dashed var(--accent); pointer-events: none; }
+  .group { margin: 12px 0 2px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .scroll { overflow-x: auto; }
+  .scroll > .timeline { min-width: 640px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 6px; border-top: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; border-top: 0; }
+  .badge { font-size: 11px; padding: 1px 6px; border-radius: 10px; background: var(--ok-soft); color: var(--ok); }
+  .badge.cancelled { background: var(--err-soft); color: var(--err); }
+  .empty { color: var(--muted); }
+  #log { font: 12px/1.5 ui-monospace, Consolas, monospace; max-height: 180px; overflow: auto; margin: 0; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Unified Service Scheduler</h1>
+  <p>Demo harness for the scheduling API: a bay and a qualified technician must be free for the whole service.</p>
+</header>
+<main>
+  <section>
+    <h2>Book a service</h2>
+    <label for="dealership">Dealership</label>
+    <select id="dealership"></select>
+    <label for="vehicle">Vehicle</label>
+    <select id="vehicle"></select>
+    <label for="service">Service</label>
+    <select id="service"></select>
+    <div class="row">
+      <div><label for="date">Date</label><input id="date" type="date"></div>
+      <div><label for="time">Start (local)</label><select id="time"></select></div>
+    </div>
+    <div class="buttons">
+      <button id="check">Check availability</button>
+      <button id="book" class="primary">Book</button>
+    </div>
+    <div id="result" class="result" role="status"></div>
+  </section>
+
+  <div class="stack">
+    <section>
+      <h2 id="day-title">Workshop schedule</h2>
+      <div class="scroll"><div id="timeline" class="timeline"></div></div>
+    </section>
+    <section>
+      <h2>Appointments</h2>
+      <div class="scroll"><table>
+        <thead><tr><th>Time</th><th>Vehicle</th><th>Customer</th><th>Service</th><th>Technician</th><th>Bay</th><th>Status</th><th></th></tr></thead>
+        <tbody id="appointments"></tbody>
+      </table></div>
+    </section>
+    <section>
+      <h2>API calls</h2>
+      <pre id="log"></pre>
+    </section>
+  </div>
+</main>
+<script>
+const OPEN = 8 * 60, CLOSE = 17 * 60;
+const $ = (id) => document.getElementById(id);
+const state = { dealerships: [], services: [], vehicles: [] };
+
+function h(tag, props = {}, ...children) {
+  const el = Object.assign(document.createElement(tag), props);
+  for (const c of children) el.append(c);
+  return el;
+}
+
+async function api(method, path, body) {
+  const headers = body ? { 'content-type': 'application/json' } : {};
+  if (method === 'POST' && path === '/appointments') headers['idempotency-key'] = crypto.randomUUID();
+  const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const data = await res.json().catch(() => null);
+  const line = `${new Date().toLocaleTimeString()}  ${method} ${decodeURIComponent(path)}  -> ${res.status}`
+    + (data && data.error ? `  ${data.error.code}` : '');
+  $('log').textContent = line + '\n' + $('log').textContent;
+  return { ok: res.ok, status: res.status, data };
+}
+
+const dealership = () => state.dealerships.find((d) => d.id === $('dealership').value);
+const service = () => state.services.find((s) => s.id === $('service').value);
+const pad = (n) => String(n).padStart(2, '0');
+const hhmm = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+
+function offset(d) {
+  const m = d.utc_offset_minutes, sign = m >= 0 ? '+' : '-';
+  return `${sign}${hhmm(Math.abs(m))}`;
+}
+// Minutes since local midnight at the dealership for an ISO timestamp.
+function localMinutes(iso, d) {
+  const t = new Date(Date.parse(iso) + d.utc_offset_minutes * 60000);
+  return t.getUTCHours() * 60 + t.getUTCMinutes();
+}
+const startAt = () => `${$('date').value}T${$('time').value}:00${offset(dealership())}`;
+const pct = (m) => `${((m - OPEN) / (CLOSE - OPEN)) * 100}%`;
+
+function showResult(kind, ...content) {
+  const box = $('result');
+  box.className = `result ${kind}`;
+  box.replaceChildren(...content);
+}
+function showError(data) {
+  const e = (data && data.error) || { code: 'ERROR', message: 'Request failed' };
+  showResult('err', h('code', { textContent: e.code }), h('div', { textContent: e.message }));
+}
+
+async function loadDay() {
+  const d = dealership();
+  const day = $('date').value;
+  $('day-title').textContent = `Workshop schedule: ${d.name}, ${day}`;
+  const from = `${day}T00:00:00${offset(d)}`;
+  const to = new Date(Date.parse(from) + 86400000).toISOString();
+  const [res, appts] = await Promise.all([
+    api('GET', `/dealerships/${d.id}/resources`),
+    api('GET', `/appointments?dealershipId=${d.id}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+  ]);
+  const confirmed = appts.data.filter((a) => a.status === 'CONFIRMED');
+  renderTimeline(res.data, confirmed);
+  renderTable(appts.data);
+}
+
+function renderTimeline({ technicians, serviceBays }, appointments) {
+  const d = dealership();
+  const s = service();
+  const [hh, mm] = $('time').value.split(':').map(Number);
+  const winStart = hh * 60 + mm, winEnd = winStart + s.duration_minutes;
+  const scale = h('div', { className: 'scale' });
+  for (let m = OPEN; m <= CLOSE; m += 60) scale.append(h('span', { textContent: hhmm(m), style: `left:${pct(m)}` }));
+
+  const lane = (name, sub, key, id) => {
+    const track = h('div', { className: 'track' });
+    for (const a of appointments.filter((a) => a[key].id === id)) {
+      const start = localMinutes(a.startAt, d), end = localMinutes(a.endAt, d);
+      track.append(h('div', {
+        className: 'block',
+        style: `left:${pct(start)};width:calc(${pct(end)} - ${pct(start)})`,
+        textContent: `${hhmm(start)} ${a.vehicle.make} ${a.vehicle.model}`,
+        title: `${hhmm(start)}-${hhmm(end)}  ${a.serviceType.name}\n${a.customer.name}, ${a.vehicle.vin}`,
+      }));
+    }
+    track.append(h('div', { className: 'window', style: `left:${pct(winStart)};width:calc(${pct(Math.min(winEnd, CLOSE))} - ${pct(winStart)})` }));
+    return h('div', { className: 'lane' }, h('div', { className: 'name', textContent: name }, h('small', { textContent: sub })), track);
+  };
+
+  $('timeline').replaceChildren(
+    h('div', { className: 'hours' }, h('div'), scale),
+    h('div', { className: 'group', textContent: 'Technicians' }),
+    ...technicians.map((t) => lane(t.name, t.skills.join(', '), 'technician', t.id)),
+    h('div', { className: 'group', textContent: 'Service bays' }),
+    ...serviceBays.map((b) => lane(b.name, b.id, 'serviceBay', b.id)),
+  );
+}
+
+function renderTable(appointments) {
+  const d = dealership();
+  if (!appointments.length) {
+    $('appointments').replaceChildren(h('tr', {}, h('td', { colSpan: 8, className: 'empty', textContent: 'No appointments on this day.' })));
+    return;
+  }
+  $('appointments').replaceChildren(...appointments.map((a) => {
+    const cancel = h('button', { className: 'small', textContent: 'Cancel', disabled: a.status !== 'CONFIRMED' });
+    cancel.onclick = async () => {
+      const r = await api('POST', `/appointments/${a.id}/cancel`);
+      r.ok ? showResult('ok', h('div', { textContent: 'Appointment cancelled. Technician and bay are free again.' })) : showError(r.data);
+      loadDay();
+    };
+    return h('tr', {},
+      h('td', { textContent: `${hhmm(localMinutes(a.startAt, d))}-${hhmm(localMinutes(a.endAt, d))}` }),
+      h('td', { textContent: `${a.vehicle.make} ${a.vehicle.model}` }),
+      h('td', { textContent: a.customer.name }),
+      h('td', { textContent: a.serviceType.name }),
+      h('td', { textContent: a.technician.name }),
+      h('td', { textContent: a.serviceBay.name }),
+      h('td', {}, h('span', { className: `badge ${a.status === 'CANCELLED' ? 'cancelled' : ''}`, textContent: a.status })),
+      h('td', {}, cancel));
+  }));
+}
+
+async function check() {
+  const r = await api('GET', `/dealerships/${dealership().id}/availability?serviceTypeId=${service().id}&startAt=${encodeURIComponent(startAt())}`);
+  if (!r.ok) return showError(r.data);
+  const { available, technicians, serviceBays } = r.data;
+  const names = (list) => list.map((x) => x.name).join(', ') || 'none';
+  showResult(available ? 'ok' : 'err',
+    h('strong', { textContent: available ? 'Available' : 'Not available' }),
+    h('div', { textContent: `Free qualified technicians: ${names(technicians)}` }),
+    h('div', { textContent: `Free bays: ${names(serviceBays)}` }));
+}
+
+async function book() {
+  const r = await api('POST', '/appointments', {
+    dealershipId: dealership().id, vehicleId: $('vehicle').value, serviceTypeId: service().id, startAt: startAt(),
+  });
+  if (!r.ok) showError(r.data);
+  else {
+    const a = r.data;
+    showResult('ok', h('strong', { textContent: 'Confirmed' }),
+      h('div', { textContent: `${a.serviceType.name} for ${a.vehicle.make} ${a.vehicle.model} (${a.customer.name})` }),
+      h('div', { textContent: `Technician: ${a.technician.name} | Bay: ${a.serviceBay.name}` }));
+  }
+  loadDay();
+}
+
+async function init() {
+  const [d, s, v] = await Promise.all([api('GET', '/dealerships'), api('GET', '/service-types'), api('GET', '/vehicles')]);
+  Object.assign(state, { dealerships: d.data, services: s.data, vehicles: v.data });
+  $('dealership').replaceChildren(...state.dealerships.map((x) => h('option', { value: x.id, textContent: x.name })));
+  $('service').replaceChildren(...state.services.map((x) => h('option', { value: x.id, textContent: `${x.name} (${x.duration_minutes} min, ${x.required_skill})` })));
+  $('vehicle').replaceChildren(...state.vehicles.map((x) => h('option', { value: x.id, textContent: `${x.make} ${x.model} (${x.vin})` })));
+  for (let m = OPEN; m < CLOSE; m += 15) $('time').append(h('option', { value: hhmm(m), textContent: hhmm(m) }));
+  $('time').value = '09:00';
+  const tomorrow = new Date(Date.now() + 86400000);
+  $('date').value = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`;
+  $('check').onclick = check;
+  $('book').onclick = book;
+  for (const id of ['dealership', 'date', 'time', 'service']) $(id).onchange = () => { $('result').className = 'result'; loadDay(); };
+  loadDay();
+}
+init();
+</script>
+</body>
+</html>

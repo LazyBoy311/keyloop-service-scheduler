@@ -12,7 +12,7 @@ In scope (backend layer, fully implemented):
 2. **Real-time availability check**: before confirming, check that a bay and a technician holding the required skill are both free for the entire duration.
 3. **Confirmed appointment record**: persist an appointment that links customer, vehicle, technician and bay.
 
-Frontend is out of scope and stubbed by the OpenAPI contract (`openapi.yaml`), cURL examples in the README and the API test suite.
+Frontend is out of scope as a product, and stubbed by a minimal demo page (`public/index.html`, served at `/`), the OpenAPI contract (`openapi.yaml`), cURL examples in the README and the API test suite.
 
 ## 2. Assumptions (requirements were intentionally ambiguous)
 

@@ -85,3 +85,15 @@ describe('REST API', () => {
     assert.match(metrics, /http_requests_total\{method="GET",route="\/health",status="200"\} 1/);
   });
 });
+
+test('serves the demo page and dealership resources', async () => {
+  const db = openDb();
+  seed(db);
+  const app = buildApp(db, { now: () => NOW });
+  const page = await app.inject({ method: 'GET', url: '/' });
+  assert.equal(page.statusCode, 200);
+  assert.match(page.headers['content-type'] as string, /text\/html/);
+  const resources = (await app.inject({ method: 'GET', url: '/dealerships/dlr-hcm/resources' })).json();
+  assert.deepEqual(resources.technicians.find((t: { id: string }) => t.id === 'tech-an').skills.sort(), ['BRAKES', 'GENERAL']);
+  assert.equal(resources.serviceBays.length, 2);
+});

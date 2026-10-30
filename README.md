@@ -4,7 +4,17 @@ Keyloop technical assessment, **Scenario A (Ownership)**: a backend service that
 
 - System design: [`docs/system-design.md`](docs/system-design.md)
 - API contract: [`openapi.yaml`](openapi.yaml)
-- Implemented layer: **backend** (REST API + persistent SQL database). The frontend is stubbed by the OpenAPI contract, the cURL examples below and the API test suite.
+- Implemented layer: **backend** (REST API + persistent SQL database). The frontend is stubbed by a minimal demo page (below), the OpenAPI contract, the cURL examples and the API test suite.
+
+## Demo UI
+
+`npm start`, then open **http://localhost:3000**. The page is a single static HTML file (`public/index.html`, no framework) served by the API. It lets you:
+
+- check availability and book a service, with the API's error code shown on conflicts;
+- see the day's **workshop timeline** per technician and per service bay, with the requested window highlighted, so it is visible *why* a slot was rejected;
+- cancel appointments, and watch the raw API calls in a log panel.
+
+![Demo UI](docs/demo-ui.png)
 
 ## Quick start
 
@@ -12,7 +22,7 @@ Requirements: **Node.js 22.18+ or 24** (uses the built-in SQLite driver and nati
 
 ```bash
 npm install
-npm test          # 21 tests: business rules, REST API, concurrent booking race
+npm test          # 22 tests: business rules, REST API, concurrent booking race
 npm run typecheck # tsc --noEmit
 npm start         # http://localhost:3000, data in ./data/scheduler.db
 ```
@@ -74,6 +84,7 @@ src/
   scheduler.ts   business rules: time window, availability, atomic booking, cancel
   app.ts         Fastify routes, validation, error mapping, metrics, request id
   server.ts      bootstrap + graceful shutdown
+public/index.html  demo UI (test harness for the frontend layer)
 test/
   scheduler.test.ts  business rules + multi-connection race (worker threads)
   api.test.ts        HTTP contract via fastify.inject

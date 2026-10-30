@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyServerOptions } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import { BookingError, createScheduler } from './scheduler.ts';
@@ -50,6 +51,19 @@ export function buildApp(db: DatabaseSync, opts: FastifyServerOptions & { now?: 
   app.get('/dealerships', async () => db.prepare('SELECT * FROM dealerships ORDER BY id').all());
   app.get('/service-types', async () => db.prepare('SELECT * FROM service_types ORDER BY id').all());
   app.get('/vehicles', async () => db.prepare('SELECT * FROM vehicles ORDER BY id').all());
+  app.get('/dealerships/:id/resources', { schema: { params: idParam } }, async (req) => {
+    const { id } = req.params as { id: string };
+    const technicians = db.prepare(
+      `SELECT t.id, t.name, group_concat(s.skill) AS skills FROM technicians t
+       LEFT JOIN technician_skills s ON s.technician_id = t.id WHERE t.dealership_id = ? GROUP BY t.id ORDER BY t.id`,
+    ).all(id).map((t) => ({ ...t, skills: t.skills ? String(t.skills).split(',') : [] }));
+    const serviceBays = db.prepare('SELECT id, name FROM service_bays WHERE dealership_id = ? ORDER BY id').all(id);
+    return { technicians, serviceBays };
+  });
+
+  // Minimal demo UI (test harness for the stubbed frontend layer).
+  const demoPage = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  app.get('/', async (_req, reply) => reply.type('text/html; charset=utf-8').send(demoPage));
 
   app.get('/dealerships/:id/availability', {
     schema: {
