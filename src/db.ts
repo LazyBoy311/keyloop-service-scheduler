@@ -81,6 +81,14 @@ WHEN NEW.status = 'CONFIRMED' AND EXISTS (
   WHERE a.status = 'CONFIRMED' AND a.technician_id = NEW.technician_id
     AND a.start_at < NEW.end_at AND a.end_at > NEW.start_at)
 BEGIN SELECT RAISE(ABORT, 'TECHNICIAN_DOUBLE_BOOKED'); END;
+
+CREATE TRIGGER IF NOT EXISTS appointments_no_vehicle_overlap
+BEFORE INSERT ON appointments
+WHEN NEW.status = 'CONFIRMED' AND EXISTS (
+  SELECT 1 FROM appointments a
+  WHERE a.status = 'CONFIRMED' AND a.vehicle_id = NEW.vehicle_id
+    AND a.start_at < NEW.end_at AND a.end_at > NEW.start_at)
+BEGIN SELECT RAISE(ABORT, 'VEHICLE_DOUBLE_BOOKED'); END;
 `;
 
 export function openDb(path = ':memory:'): DatabaseSync {

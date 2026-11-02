@@ -9,6 +9,7 @@ paths:
   /dealerships/{id}/availability:
     get:
       summary: Check whether a service can be booked at a given start time
+      description: Workshop capacity only (qualified technician + bay). Whether the vehicle is already booked elsewhere is checked by POST /appointments.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string }, example: dlr-hcm }
         - { name: serviceTypeId, in: query, required: true, schema: { type: string }, example: svc-brake }
@@ -29,8 +30,8 @@ paths:
         - name: Idempotency-Key
           in: header
           required: false
-          description: Retrying with the same key returns the original appointment (200) instead of booking twice.
-          schema: { type: string, maxLength: 200 }
+          description: Retrying with the same key and body returns the original appointment (200) instead of booking twice. The same key with a different body is rejected (422 IDEMPOTENCY_KEY_REUSED).
+          schema: { type: string, minLength: 1, maxLength: 200 }
       requestBody:
         required: true
         content:
@@ -57,7 +58,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
-          description: 'Business rule violated: OUTSIDE_OPENING_HOURS, NO_QUALIFIED_TECHNICIAN'
+          description: 'Business rule violated: OUTSIDE_OPENING_HOURS, NO_QUALIFIED_TECHNICIAN, IDEMPOTENCY_KEY_REUSED'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -73,6 +74,8 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/Appointment' } }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
   /appointments/{id}:
     get:
       summary: Get an appointment
@@ -97,6 +100,16 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Appointment' }
         '404': { $ref: '#/components/responses/Error' }
+  /dealerships/{id}/resources:
+    get:
+      summary: Technicians (with skills) and service bays of a dealership
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 'Technicians and service bays' }
+        '404': { $ref: '#/components/responses/Error' }
+  /:
+    get: { summary: Demo UI (static HTML), responses: { '200': { description: HTML page } } }
   /dealerships:
     get: { summary: List dealerships, responses: { '200': { description: Dealerships } } }
   /service-types:
@@ -110,7 +123,7 @@ paths:
 components:
   responses:
     Error:
-      description: Error
+      description: 'Error. Every error uses this envelope, including BAD_REQUEST (malformed body) and ROUTE_NOT_FOUND.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

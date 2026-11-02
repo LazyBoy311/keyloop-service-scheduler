@@ -108,7 +108,7 @@
   </div>
 </main>
 <script>
-const OPEN = 8 * 60, CLOSE = 17 * 60;
+let OPEN = 8 * 60, CLOSE = 17 * 60; // replaced by the selected dealership's opening hours
 const $ = (id) => document.getElementById(id);
 const state = { dealerships: [], services: [], vehicles: [] };
 
@@ -159,6 +159,7 @@ function showError(data) {
 async function loadDay() {
   const d = dealership();
   const day = $('date').value;
+  if (d.open_minute !== OPEN || d.close_minute !== CLOSE) fillTimes(d);
   $('day-title').textContent = `Workshop schedule: ${d.name}, ${day}`;
   const from = `${day}T00:00:00${offset(d)}`;
   const to = new Date(Date.parse(from) + 86400000).toISOString();
@@ -253,16 +254,25 @@ async function book() {
   loadDay();
 }
 
+function fillTimes(d) {
+  OPEN = d.open_minute; CLOSE = d.close_minute;
+  const keep = $('time').value;
+  const times = [];
+  for (let m = OPEN; m < CLOSE; m += 15) times.push(h('option', { value: hhmm(m), textContent: hhmm(m) }));
+  $('time').replaceChildren(...times);
+  if (keep) $('time').value = keep;
+}
+
 async function init() {
   const [d, s, v] = await Promise.all([api('GET', '/dealerships'), api('GET', '/service-types'), api('GET', '/vehicles')]);
   Object.assign(state, { dealerships: d.data, services: s.data, vehicles: v.data });
   $('dealership').replaceChildren(...state.dealerships.map((x) => h('option', { value: x.id, textContent: x.name })));
   $('service').replaceChildren(...state.services.map((x) => h('option', { value: x.id, textContent: `${x.name} (${x.duration_minutes} min, ${x.required_skill})` })));
   $('vehicle').replaceChildren(...state.vehicles.map((x) => h('option', { value: x.id, textContent: `${x.make} ${x.model} (${x.vin})` })));
-  for (let m = OPEN; m < CLOSE; m += 15) $('time').append(h('option', { value: hhmm(m), textContent: hhmm(m) }));
+  fillTimes(dealership());
   $('time').value = '09:00';
-  const tomorrow = new Date(Date.now() + 86400000);
-  $('date').value = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`;
+  // "Tomorrow" in the dealership's time zone, not the browser's.
+  $('date').value = new Date(Date.now() + 86400000 + dealership().utc_offset_minutes * 60000).toISOString().slice(0, 10);
   $('check').onclick = check;
   $('book').onclick = book;
   for (const id of ['dealership', 'date', 'time', 'service']) $(id).onchange = () => { $('result').className = 'result'; loadDay(); };

@@ -33,9 +33,17 @@ export function buildApp(db: DatabaseSync, opts: FastifyServerOptions & { now?: 
     }
     const e = err as { validation?: unknown; statusCode?: number; message: string };
     if (e.validation) return reply.status(400).send({ error: { code: 'VALIDATION_ERROR', message: e.message } });
+    // Client errors raised by Fastify itself: malformed JSON, body too large, wrong content type.
+    if (e.statusCode && e.statusCode < 500) {
+      req.log.info({ statusCode: e.statusCode }, e.message);
+      return reply.status(e.statusCode).send({ error: { code: 'BAD_REQUEST', message: e.message } });
+    }
     req.log.error(err);
-    return reply.status(e.statusCode ?? 500).send({ error: { code: 'INTERNAL_ERROR', message: 'Unexpected error' } });
+    return reply.status(500).send({ error: { code: 'INTERNAL_ERROR', message: 'Unexpected error' } });
   });
+
+  app.setNotFoundHandler((req, reply) =>
+    reply.status(404).send({ error: { code: 'ROUTE_NOT_FOUND', message: `${req.method} ${req.url} does not exist` } }));
 
   app.get('/health', async () => {
     db.prepare('SELECT 1').get();
@@ -47,19 +55,11 @@ export function buildApp(db: DatabaseSync, opts: FastifyServerOptions & { now?: 
     return [...metrics].map(([k, v]) => `${k} ${v}`).join('\n') + '\n';
   });
 
-  // Read-only reference data so a client can discover valid IDs.
-  app.get('/dealerships', async () => db.prepare('SELECT * FROM dealerships ORDER BY id').all());
-  app.get('/service-types', async () => db.prepare('SELECT * FROM service_types ORDER BY id').all());
-  app.get('/vehicles', async () => db.prepare('SELECT * FROM vehicles ORDER BY id').all());
-  app.get('/dealerships/:id/resources', { schema: { params: idParam } }, async (req) => {
-    const { id } = req.params as { id: string };
-    const technicians = db.prepare(
-      `SELECT t.id, t.name, group_concat(s.skill) AS skills FROM technicians t
-       LEFT JOIN technician_skills s ON s.technician_id = t.id WHERE t.dealership_id = ? GROUP BY t.id ORDER BY t.id`,
-    ).all(id).map((t) => ({ ...t, skills: t.skills ? String(t.skills).split(',') : [] }));
-    const serviceBays = db.prepare('SELECT id, name FROM service_bays WHERE dealership_id = ? ORDER BY id').all(id);
-    return { technicians, serviceBays };
-  });
+  app.get('/dealerships', async () => scheduler.referenceData.dealerships());
+  app.get('/service-types', async () => scheduler.referenceData.serviceTypes());
+  app.get('/vehicles', async () => scheduler.referenceData.vehicles());
+  app.get('/dealerships/:id/resources', { schema: { params: idParam } }, async (req) =>
+    scheduler.listResources((req.params as { id: string }).id));
 
   // Minimal demo UI (test harness for the stubbed frontend layer).
   const demoPage = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
@@ -82,8 +82,7 @@ export function buildApp(db: DatabaseSync, opts: FastifyServerOptions & { now?: 
 
   app.post('/appointments', {
     schema: {
-      headers: { type: 'object', properties: { 'idempotency-key': { type: 'string', minLength: 1, maxLength: 200 } } },
-      body: {
+      headers: { type: 'object', properties: { 'idempotency-key': { type: 'string', minLength: 1, maxLength: 200 } } },      body: {
         type: 'object',
         required: ['dealershipId', 'vehicleId', 'serviceTypeId', 'startAt'],
         additionalProperties: false,
@@ -124,8 +123,8 @@ export function buildApp(db: DatabaseSync, opts: FastifyServerOptions & { now?: 
     scheduler.getAppointment((req.params as { id: string }).id));
 
   app.post('/appointments/:id/cancel', { schema: { params: idParam } }, async (req) => {
-    const appointment = scheduler.cancel((req.params as { id: string }).id);
-    inc('appointments_cancelled_total');
+    const { appointment, changed } = scheduler.cancel((req.params as { id: string }).id);
+    if (changed) inc('appointments_cancelled_total');
     return appointment;
   });
 

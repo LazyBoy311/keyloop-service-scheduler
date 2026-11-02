@@ -22,7 +22,7 @@ Requirements: **Node.js 22.18+ or 24** (uses the built-in SQLite driver and nati
 
 ```bash
 npm install
-npm test          # 22 tests: business rules, REST API, concurrent booking race
+npm test          # 26 tests: business rules, REST API, concurrent booking race
 npm run typecheck # tsc --noEmit
 npm start         # http://localhost:3000, data in ./data/scheduler.db
 ```
@@ -80,10 +80,10 @@ curl http://localhost:3000/metrics
 
 | HTTP | Code | Meaning |
 |---|---|---|
-| 400 | `VALIDATION_ERROR`, `INVALID_START_TIME`, `START_TIME_IN_PAST` | Malformed request, not on the 15-minute grid, or in the past |
-| 404 | `DEALERSHIP_NOT_FOUND`, `SERVICE_TYPE_NOT_FOUND`, `VEHICLE_NOT_FOUND`, `APPOINTMENT_NOT_FOUND` | Unknown reference |
+| 400 | `VALIDATION_ERROR`, `BAD_REQUEST`, `INVALID_START_TIME`, `START_TIME_IN_PAST` | Malformed request, not on the 15-minute grid, or in the past |
+| 404 | `DEALERSHIP_NOT_FOUND`, `SERVICE_TYPE_NOT_FOUND`, `VEHICLE_NOT_FOUND`, `APPOINTMENT_NOT_FOUND`, `ROUTE_NOT_FOUND` | Unknown reference or route |
 | 409 | `NO_TECHNICIAN_AVAILABLE`, `NO_BAY_AVAILABLE`, `VEHICLE_ALREADY_BOOKED`, `SLOT_TAKEN` | Resources not free for the whole window |
-| 422 | `OUTSIDE_OPENING_HOURS`, `NO_QUALIFIED_TECHNICIAN` | Can never be booked as requested |
+| 422 | `OUTSIDE_OPENING_HOURS`, `NO_QUALIFIED_TECHNICIAN`, `IDEMPOTENCY_KEY_REUSED` | Can never be booked as requested, or a key reused for a different request |
 
 ## Project layout
 
@@ -104,8 +104,8 @@ openapi.yaml
 ## How correctness is guaranteed
 
 - **Entire-duration check.** Overlap uses half-open intervals (`a.start < b.end AND a.end > b.start`), so partial overlaps are rejected and back-to-back bookings are allowed.
-- **No double booking under concurrency.** Check and insert run in one `BEGIN IMMEDIATE` transaction. In addition, database triggers reject any overlapping confirmed appointment for the same bay or technician. A test races three worker threads on separate DB connections for the last slot and asserts exactly one wins.
-- **Safe retries.** `Idempotency-Key` returns the original appointment instead of booking twice.
+- **No double booking under concurrency.** Check and insert run in one `BEGIN IMMEDIATE` transaction. In addition, database triggers reject any overlapping confirmed appointment for the same bay, technician or vehicle. A test races three worker threads on separate DB connections for the last slot and asserts exactly one wins.
+- **Safe retries.** `Idempotency-Key` returns the original appointment instead of booking twice. The key is looked up under the same write lock, so retries racing on separate instances are safe too, and reusing a key for a different request is rejected.
 
 ## AI Collaboration Narrative
 

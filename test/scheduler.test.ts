@@ -33,7 +33,7 @@ describe('scheduler', () => {
     assert.ok(appointment.serviceBay.id);
     assert.equal(appointment.startAt, '2030-03-04T02:00:00.000Z');
     assert.equal(appointment.endAt, '2030-03-04T03:00:00.000Z'); // 60-minute service
-    assert.deepEqual(s.getAppointment(appointment.id as string), appointment); // persisted
+    assert.deepEqual(s.getAppointment(appointment.id), appointment); // persisted
   });
 
   test('only assigns a technician who has the required skill', () => {
@@ -93,8 +93,22 @@ describe('scheduler', () => {
   test('cancelling frees the technician and bay', () => {
     const { appointment } = s.book({ dealershipId: 'dlr-hn', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') });
     rejects(() => s.book({ dealershipId: 'dlr-hn', vehicleId: 'veh-2', serviceTypeId: 'svc-oil', startAt: at('09:00') }), 'NO_TECHNICIAN_AVAILABLE');
-    assert.equal(s.cancel(appointment.id as string).status, 'CANCELLED');
+    const first = s.cancel(appointment.id);
+    assert.equal(first.appointment.status, 'CANCELLED');
+    assert.equal(first.changed, true);
+    assert.equal(s.cancel(appointment.id).changed, false); // idempotent
     assert.ok(s.book({ dealershipId: 'dlr-hn', vehicleId: 'veh-2', serviceTypeId: 'svc-oil', startAt: at('09:00') }));
+  });
+
+  test('rejects a booking that fully contains an existing one', () => {
+    s.book({ dealershipId: 'dlr-hn', vehicleId: 'veh-1', serviceTypeId: 'svc-tyre', startAt: at('09:15') }); // 09:15-10:00
+    rejects(() => s.book({ dealershipId: 'dlr-hn', vehicleId: 'veh-2', serviceTypeId: 'svc-oil', startAt: at('09:00') }),
+      'NO_TECHNICIAN_AVAILABLE'); // 09:00-10:00
+  });
+
+  test('availability check rejects the same impossible requests as booking', () => {
+    rejects(() => s.checkAvailability('dlr-hn', 'svc-ev', at('09:00')), 'NO_QUALIFIED_TECHNICIAN');
+    rejects(() => s.checkAvailability('nope', 'svc-oil', at('09:00')), 'DEALERSHIP_NOT_FOUND');
   });
 
   test('replaying the same idempotency key returns the original appointment', () => {
@@ -106,11 +120,21 @@ describe('scheduler', () => {
     assert.equal(s.listAppointments('dlr-hcm').length, 1);
   });
 
-  test('database triggers block an overlapping insert even if application checks are bypassed', () => {
-    const { appointment } = s.book({ dealershipId: 'dlr-hn', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') });
-    assert.throws(() => db.prepare(
-      `INSERT INTO appointments VALUES ('x', 'dlr-hn', 'cus-2', 'veh-3', 'svc-oil', 'tech-dung', 'bay-hn-1', ?, ?, 'CONFIRMED', NULL, 0, NULL)`,
-    ).run(Date.parse(appointment.startAt) + 30 * 60_000, Date.parse(appointment.endAt) + 30 * 60_000), /DOUBLE_BOOKED/);
+  test('reusing an idempotency key for a different request is rejected', () => {
+    s.book({ dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') }, 'key-1');
+    rejects(() => s.book({ dealershipId: 'dlr-hcm', vehicleId: 'veh-3', serviceTypeId: 'svc-oil', startAt: at('11:00') }, 'key-1'),
+      'IDEMPOTENCY_KEY_REUSED');
+  });
+
+  test('database triggers block each kind of overlap even if application checks are bypassed', () => {
+    // veh-1 oil 09:00-10:00 at dlr-hcm takes tech-an and bay-hcm-1 (first fit).
+    s.book({ dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') });
+    const insert = (vehicle: string, technician: string, bay: string) => () => db.prepare(
+      `INSERT INTO appointments VALUES (?, 'dlr-hcm', 'cus-2', ?, 'svc-oil', ?, ?, ?, ?, 'CONFIRMED', NULL, 0, NULL)`,
+    ).run(crypto.randomUUID(), vehicle, technician, bay, Date.parse(at('09:30')), Date.parse(at('10:30')));
+    assert.throws(insert('veh-3', 'tech-binh', 'bay-hcm-1'), /BAY_DOUBLE_BOOKED/);
+    assert.throws(insert('veh-3', 'tech-an', 'bay-hcm-2'), /TECHNICIAN_DOUBLE_BOOKED/);
+    assert.throws(insert('veh-1', 'tech-binh', 'bay-hcm-2'), /VEHICLE_DOUBLE_BOOKED/);
   });
 });
 

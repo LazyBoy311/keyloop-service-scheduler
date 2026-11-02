@@ -97,10 +97,10 @@ sequenceDiagram
     C->>A: POST /appointments {dealershipId, vehicleId, serviceTypeId, startAt} + Idempotency-Key
     A->>A: JSON-schema validation (400 on failure)
     A->>D: book(request, key)
-    D->>DB: key already used? -> return original appointment (200)
     D->>D: resolve window: duration, 15-min grid, future, opening hours (400/422)
     D->>DB: any qualified technician at this dealership? (422 if none)
     D->>DB: BEGIN IMMEDIATE (take write lock)
+    D->>DB: key already used? same request -> original appointment (200), different -> 422
     D->>DB: vehicle overlap? (409 VEHICLE_ALREADY_BOOKED)
     D->>DB: free technicians with skill AND free bays for [start, end)
     alt none free
@@ -114,15 +114,15 @@ sequenceDiagram
     end
 ```
 
-`GET /dealerships/{id}/availability` runs the same window validation and resource query without writing, so a UI can show whether a slot is bookable before the user confirms.
+`GET /dealerships/{id}/availability` runs the same validation (including the 422 rules) and resource query without writing, so a UI can show whether a slot is bookable before the user confirms. It reports workshop capacity only; a clash with the same vehicle's other bookings is detected at booking time.
 
 ### Correctness under concurrency
 
 The critical race: two advisors book the last free bay at the same moment. Both read "free", both insert, and the bay is double-booked. Three layers prevent it:
 
 1. **Serialised check-then-insert.** The availability query and the insert run inside `BEGIN IMMEDIATE`, which takes the database write lock *before* reading. A second writer waits (`busy_timeout`) and then sees the first booking.
-2. **Database invariant.** `BEFORE INSERT` triggers reject any overlapping confirmed appointment for the same bay or technician, even if a future code path forgets the check. In PostgreSQL this becomes `EXCLUDE USING gist (bay_id WITH =, tstzrange(start_at, end_at) WITH &&) WHERE (status = 'CONFIRMED')`, which also lets multiple app instances book in parallel without a global lock.
-3. **Idempotency keys.** A client that times out and retries does not create a second booking.
+2. **Database invariant.** `BEFORE INSERT` triggers reject any overlapping confirmed appointment for the same bay, technician or vehicle, even if a future code path forgets the check. In PostgreSQL this becomes `EXCLUDE USING gist (bay_id WITH =, tstzrange(start_at, end_at) WITH &&) WHERE (status = 'CONFIRMED')`, which also lets multiple app instances book in parallel without a global lock.
+3. **Idempotency keys.** A client that times out and retries does not create a second booking. The key is checked inside the locked transaction, and a key reused with a different body is rejected rather than silently returning someone else's booking.
 
 This is verified by a test that starts three worker threads with **separate database connections** that race for the last slot: exactly one wins.
 

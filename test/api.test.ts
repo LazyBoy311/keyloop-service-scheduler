@@ -61,7 +61,7 @@ describe('REST API', () => {
     assert.equal(retry.json().id, first.json().id);
   });
 
-  test('parallel requests for the last slot produce exactly one booking', async () => {
+  test('concurrent requests in one process for the last slot produce exactly one booking (cross-process race: see scheduler.test.ts)', async () => {
     const responses = await Promise.all(['veh-1', 'veh-2', 'veh-3'].map((vehicleId) =>
       book({ dealershipId: 'dlr-hn', vehicleId, serviceTypeId: 'svc-oil', startAt: at('09:00') })));
     assert.deepEqual(responses.map((r) => r.statusCode).sort(), [201, 409, 409]);
@@ -76,12 +76,30 @@ describe('REST API', () => {
     assert.equal(missing.json().error.code, 'APPOINTMENT_NOT_FOUND');
   });
 
+  test('client errors use the same error envelope', async () => {
+    const badJson = await app.inject({ method: 'POST', url: '/appointments', payload: '{bad', headers: { 'content-type': 'application/json' } });
+    assert.equal(badJson.statusCode, 400);
+    assert.equal(badJson.json().error.code, 'BAD_REQUEST');
+    const noRoute = await app.inject({ method: 'GET', url: '/nope' });
+    assert.equal(noRoute.statusCode, 404);
+    assert.equal(noRoute.json().error.code, 'ROUTE_NOT_FOUND');
+    const noDealer = await app.inject({ method: 'GET', url: '/appointments?dealershipId=zzz' });
+    assert.equal(noDealer.statusCode, 404);
+    assert.equal(noDealer.json().error.code, 'DEALERSHIP_NOT_FOUND');
+    const neverPossible = await app.inject({ method: 'GET', url: `/dealerships/dlr-hn/availability?serviceTypeId=svc-ev&startAt=${encodeURIComponent(at('09:00'))}` });
+    assert.equal(neverPossible.statusCode, 422);
+  });
+
   test('echoes x-request-id and exposes metrics', async () => {
     const res = await app.inject({ method: 'GET', url: '/health', headers: { 'x-request-id': 'trace-123' } });
     assert.equal(res.headers['x-request-id'], 'trace-123');
     await book({ dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') });
     const metrics = (await app.inject({ method: 'GET', url: '/metrics' })).body;
     assert.match(metrics, /appointments_booked_total 1/);
+    const id = JSON.parse((await app.inject({ method: 'GET', url: '/appointments?dealershipId=dlr-hcm' })).body)[0].id;
+    await app.inject({ method: 'POST', url: `/appointments/${id}/cancel` });
+    await app.inject({ method: 'POST', url: `/appointments/${id}/cancel` });
+    assert.match((await app.inject({ method: 'GET', url: '/metrics' })).body, /appointments_cancelled_total 1\n/);
     assert.match(metrics, /http_requests_total\{method="GET",route="\/health",status="200"\} 1/);
   });
 });
