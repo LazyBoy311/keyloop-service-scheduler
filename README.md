@@ -27,6 +27,15 @@ npm run typecheck # tsc --noEmit
 npm start         # http://localhost:3000, data in ./data/scheduler.db
 ```
 
+Or with Docker (no Node.js needed):
+
+```bash
+docker build -t service-scheduler .
+docker run -p 3000:3000 -v scheduler-data:/app/data service-scheduler
+```
+
+The image uses the same SQLite file, kept in a volume. PostgreSQL is the production path (see the design doc, section 4), not needed to run this submission.
+
 Environment variables: `PORT` (default `3000`), `DB_PATH` (default `data/scheduler.db`, or `:memory:`), `LOG_LEVEL` (default `info`).
 
 Reference data is seeded on start:
