@@ -196,9 +196,9 @@ Beyond the production gaps above, product features worth adding:
 
 ## 10. How GenAI was used in the design phase
 
-> Draft. Edit this section in your own words before submitting; it must describe your real process.
-
-- **Requirement clarification.** I asked the AI to list ambiguities in the three core requirements. That produced the assumptions table (duration per service type, one bay plus one technician, customer = vehicle owner, opening hours, half-open intervals). I then decided which ones to adopt.
-- **Risk identification.** I prompted for "what breaks a scheduling system in production". The AI flagged the check-then-insert race condition. I chose a defence-in-depth answer (transaction lock + DB constraint + idempotency) rather than only an application-level check.
-- **Technology trade-offs.** I compared PostgreSQL vs. SQLite with the AI. Because Docker was not available locally and reviewers should be able to run the project with one command, we chose SQLite for the submission. I kept the PostgreSQL `EXCLUDE` constraint as the documented production path.
-- **Diagrams.** The AI drafted the Mermaid diagrams from the agreed component list. I reviewed them against the code.
+- **Domain grounding.** Before starting, I researched Keyloop and used the AI to learn the after-sales domain: what a service bay is, why technician skills matter, and where workshop capacity is lost. That framing became section 1.
+- **Turning ambiguity into explicit assumptions.** The brief is deliberately vague: how long a service takes, what "qualified" means, who the customer is. The AI listed the open questions and proposed answers. They are recorded as assumptions A1-A9 so every one is visible and can be challenged, and I reviewed each of them before submitting.
+- **Risk first.** I asked what breaks a booking system in production. The answer was the check-then-insert race, two bookings taking the last free bay. I chose defence in depth (write lock, database triggers, idempotency keys) rather than an application-level check alone, and required the guarantee to be proven by tests that use separate connections and processes.
+- **Technology trade-offs.** We compared SQLite and PostgreSQL. I chose SQLite for this submission so reviewers can run everything with one command, and documented PostgreSQL with an `EXCLUDE` constraint as the production path, which also removes SQLite's single global write lock.
+- **Diagrams checked against code.** The AI drafted the Mermaid diagrams from the agreed components. Reviewing them against the schema caught an ER entity that did not exist as a table, which I removed.
+- **Honest scope.** I asked the AI whether the design was production-ready and had it list every gap, ranked by risk. Those became section 8 instead of being left implicit.

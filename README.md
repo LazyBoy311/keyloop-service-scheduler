@@ -120,19 +120,38 @@ openapi.yaml
 
 ## AI Collaboration Narrative
 
-> Draft. Rewrite this in your own words before submitting; it is evaluated as your story.
+**Tool and roles.** I used Claude Code (an agentic CLI) as the implementer and acted as tech lead: I set the scope and constraints, made the trade-off decisions, and decided when the work was good enough. Almost all of the code was written by the agent. My effort went into directing it and verifying what it produced.
 
-**Tool.** Claude Code (agentic CLI) as the implementer. I acted as tech lead: I chose the scenario and layer, set constraints and reviewed every step.
+### 1. Strategy for guiding the AI
 
-**Strategy.**
-1. *Context first.* I gave the AI the full challenge PDF and the business context (after-sales, service bays, technician skills), then had it propose assumptions before writing any code. I accepted or changed each assumption, and they are recorded in the design doc.
-2. *Constraints up front.* Backend in TypeScript (my strongest stack). Minimal dependencies. A real SQL database that reviewers can run without Docker. Every business rule must have a test.
-3. *Small, verifiable steps.* Schema, then domain logic, then HTTP layer, then tests, then docs. I ran the tests and the type checker after each step instead of trusting the generated code.
+- **Context before code.** Before asking for anything, I researched Keyloop and used the AI to learn the after-sales domain (service bays, technician skills, why workshop capacity matters), then gave the agent the full challenge brief and that context.
+- **Agent drafts end to end, I steer the scope.** My usual workflow is to review the agent's plan and interfaces before any code is written. For this assessment I let it draft a complete first version (schema, domain logic, API, tests, docs) so that I could spend my time reviewing working software rather than a plan. I then steered through explicit decisions:
+  - Scenario A and the backend layer.
+  - A small demo UI. The first version stopped at cURL examples, and I pushed back because a reviewer should be able to see and try the system.
+  - Docker. I asked why there was no Docker or database server, weighed the options, and chose a Dockerfile around SQLite over migrating to PostgreSQL. That keeps the run to one command and leaves PostgreSQL as the documented production path.
+  - Small, single-purpose commits, so the history is reviewable.
+- **Review depth follows scope.** For a small improvement I check the evidence (tests, output, screenshots) and skim the flow. For the core booking path, the concurrency guarantees and the tests themselves, I review closely and keep questioning the agent until the evidence convinces me.
 
-**Verification and refinement.**
-- **Concurrency.** Double booking is the main risk in a scheduler, so I required defence in depth from the start: a locking transaction and a database-level invariant. I also required a test that proves it with separate database connections, because parallel HTTP calls inside one Node process never truly interleave and would prove nothing.
-- **Caught in review.** The first `listAppointments` loaded each appointment with a separate query (N+1). This was refactored to one joined query shared with `getAppointment`.
-- **Debugging.** The concurrency test failed on Windows with `EPERM` while deleting the temp database. The cause was that worker threads had not released the file yet. The fix was to wait for each worker's `exit` event before cleanup. The assertion itself had passed, so the bug was in the test harness, not the booking logic.
-- **Smoke test.** Beyond automated tests, I ran the server and walked through the cURL flow above (201, then 409, then metrics) to check real behaviour.
+### 2. Verifying and refining the output
 
-**Owning the result.** I can explain every line. The key decisions (auto-assignment, half-open intervals, 409 vs 422 split, SQLite now and PostgreSQL `EXCLUDE` later) are mine and documented with their trade-offs.
+I did not let the agent mark its own homework. Each round of questioning below found real defects:
+
+| What I asked for | What it found |
+|---|---|
+| **An independent review by a second AI agent** that was given the code but not the first agent's conclusions | 8 issues the implementer missed. The worst: the `Idempotency-Key` lookup ran outside the write lock, so the same retry hitting two instances could fail; a key reused with a different body silently returned someone else's booking; a trigger test never actually exercised the technician trigger. All fixed, each with a test. |
+| *"Can we test two API calls at the same time?"* | A test that starts **two real server processes** on one database and fires parallel HTTP requests. It exposed a real bug: Fastify silently drops unknown fields, so a client sending `technicianId` got `201` and believed it had chosen the technician. Unknown fields are now rejected. |
+| *"Is there any case we have not tested?"* | 100% line and branch coverage. The `SLOT_TAKEN` path had only been reached when a race happened to interleave that way, so it is now forced with fault injection. |
+| *"Are the tests mocking too much?"* | Mutation testing (`npm run mutation`): 31 deliberate bugs, all caught. It also found two weak spots (a booking that ends exactly when another starts; an inclusive `from` filter). The first mutation run reported almost everything caught, which was suspicious: the test command itself was broken, so every mutation looked "caught". The script now runs a baseline first. Verifying the verifier mattered. |
+| *"Is this ready for production?"* | An honest "no", turned into the ranked production readiness assessment in the design doc (section 8). |
+
+Other mistakes I caught in the agent's output: it committed the challenge PDF, drew an ER diagram with a table that does not exist, wrote an N+1 query, authored commits with the wrong email, and assumed a `415` response that Fastify does not return. An early draft of this narrative also described a step that never happened, and I removed it.
+
+### 3. Ensuring final quality
+
+- **Tests at every level, all in CI** on Node 22.18 and 24 for every push:
+  - 54 backend tests: business rules, the REST contract, worker-thread and two-process races, and restart.
+  - 7 Playwright tests of the UI in a real browser.
+  - A Docker smoke test.
+- **Tests that are proven to test something.** Coverage shows every line runs, and mutation testing shows the assertions fail when the logic is wrong. The Playwright tests were checked the same way, by breaking the UI three ways.
+- **Run it like a reviewer.** Fresh clone from GitHub, `npm ci`, the full suite, then a 25-step walkthrough of the API flows over HTTP.
+- **Ownership.** I can explain each design decision and its trade-off: auto-assignment, half-open intervals, 409 vs 422, the three layers against double booking, and SQLite now with a PostgreSQL `EXCLUDE` constraint later. I also documented what is deliberately out of scope and why.
