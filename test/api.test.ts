@@ -90,6 +90,21 @@ describe('REST API', () => {
     assert.equal(neverPossible.statusCode, 422);
   });
 
+  test('rejects unsupported content types and oversized bodies with the error envelope', async () => {
+    const xml = await app.inject({ method: 'POST', url: '/appointments', payload: '<a/>', headers: { 'content-type': 'application/xml' } });
+    assert.deepEqual([xml.statusCode, xml.json().error.code], [415, 'BAD_REQUEST']);
+    const huge = await app.inject({
+      method: 'POST', url: '/appointments', headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ dealershipId: 'x'.repeat(1_100_000) }), // Fastify's default body limit is 1 MiB
+    });
+    assert.deepEqual([huge.statusCode, huge.json().error.code], [413, 'BAD_REQUEST']);
+  });
+
+  test('generates a request id when the caller does not send one', async () => {
+    const res = await app.inject({ method: 'GET', url: '/health' });
+    assert.match(res.headers['x-request-id'] as string, /^[0-9a-f-]{36}$/);
+  });
+
   test('validates every input at the API boundary', async () => {
     const valid = { dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') };
     const cases: [string, Awaited<ReturnType<typeof book>>][] = [
@@ -162,6 +177,16 @@ describe('REST API', () => {
     await book({ dealershipId: 'dlr-hn', vehicleId: 'veh-3', serviceTypeId: 'svc-oil', startAt: at('09:00') }); // conflict
     assert.match((await app.inject({ method: 'GET', url: '/metrics' })).body, /booking_conflicts_total\{code="NO_TECHNICIAN_AVAILABLE"\} 1/);
   });
+});
+
+test('unexpected failures return 500 without leaking internals', async () => {
+  const db = openDb();
+  seed(db);
+  const app = buildApp(db, { now: () => NOW });
+  db.close(); // simulate the database going away
+  const res = await app.inject({ method: 'GET', url: '/health' });
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.json(), { error: { code: 'INTERNAL_ERROR', message: 'Unexpected error' } });
 });
 
 test('serves the demo page and dealership resources', async () => {
