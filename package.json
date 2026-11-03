@@ -10,7 +10,8 @@
     "start": "node --disable-warning=ExperimentalWarning src/server.ts",
     "dev": "node --disable-warning=ExperimentalWarning --watch src/server.ts",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "coverage": "node --disable-warning=ExperimentalWarning --test --experimental-test-coverage --test-coverage-include=src/** test/*.test.ts"
   },
   "dependencies": {
     "fastify": "^5.12.7"
