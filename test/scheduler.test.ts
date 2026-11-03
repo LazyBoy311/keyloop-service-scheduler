@@ -126,6 +126,78 @@ describe('scheduler', () => {
       'IDEMPOTENCY_KEY_REUSED');
   });
 
+  test('opening hours are inclusive at both edges', () => {
+    const book = (vehicleId: string, serviceTypeId: string, time: string) =>
+      s.book({ dealershipId: 'dlr-hcm', vehicleId, serviceTypeId, startAt: at(time) });
+    assert.ok(book('veh-1', 'svc-oil', '08:00')); // first slot of the day
+    assert.ok(book('veh-2', 'svc-tyre', '16:15')); // 45 min, ends exactly at 17:00
+    rejects(() => book('veh-3', 'svc-tyre', '16:30'), 'OUTSIDE_OPENING_HOURS'); // would end 17:15
+  });
+
+  test('start time is interpreted in the dealership time zone whatever offset the client sends', () => {
+    const book = (vehicleId: string, startAt: string) =>
+      () => s.book({ dealershipId: 'dlr-hcm', vehicleId, serviceTypeId: 'svc-oil', startAt });
+    const { appointment } = book('veh-1', '2030-03-04T01:00:00Z')(); // 08:00 in UTC+7
+    assert.equal(appointment.startAt, '2030-03-04T01:00:00.000Z');
+    rejects(book('veh-2', '2030-03-04T00:45:00Z'), 'OUTSIDE_OPENING_HOURS'); // 07:45 local
+    assert.ok(book('veh-2', '2030-03-04T10:00:00+09:00')()); // 08:00 local
+  });
+
+  test('assigns the first free qualified technician and bay', () => {
+    const book = (vehicleId: string, serviceTypeId: string) =>
+      s.book({ dealershipId: 'dlr-hcm', vehicleId, serviceTypeId, startAt: at('09:00') }).appointment;
+    const first = book('veh-1', 'svc-oil');
+    const second = book('veh-2', 'svc-oil');
+    assert.deepEqual([first.technician.id, first.serviceBay.id], ['tech-an', 'bay-hcm-1']);
+    assert.deepEqual([second.technician.id, second.serviceBay.id], ['tech-binh', 'bay-hcm-2']);
+    s.cancel(second.id);
+    assert.equal(book('veh-3', 'svc-ev').technician.id, 'tech-chi'); // the only EV technician
+  });
+
+  test('availability lists every free qualified technician and bay', () => {
+    const r = s.checkAvailability('dlr-hcm', 'svc-oil', at('09:00'));
+    assert.deepEqual(r.technicians.map((t) => t.id), ['tech-an', 'tech-binh', 'tech-chi']);
+    assert.deepEqual(r.serviceBays.map((b) => b.id), ['bay-hcm-1', 'bay-hcm-2']);
+    assert.equal(r.endAt, '2030-03-04T03:00:00.000Z');
+    assert.deepEqual(s.checkAvailability('dlr-hcm', 'svc-brake', at('09:00')).technicians.map((t) => t.id), ['tech-an']);
+  });
+
+  test('dealerships do not share technicians or bays', () => {
+    s.book({ dealershipId: 'dlr-hn', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') }); // fills dlr-hn
+    const { appointment } = s.book({ dealershipId: 'dlr-hcm', vehicleId: 'veh-2', serviceTypeId: 'svc-oil', startAt: at('09:00') });
+    assert.equal(appointment.serviceBay.id, 'bay-hcm-1');
+  });
+
+  test('the same vehicle can be booked back-to-back, and again after cancelling', () => {
+    const book = (time: string) => s.book({ dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at(time) });
+    const first = book('09:00').appointment; // 09:00-10:00
+    assert.ok(book('10:00')); // back-to-back is fine
+    rejects(() => book('09:30'), 'VEHICLE_ALREADY_BOOKED');
+    s.cancel(first.id);
+    assert.ok(book('09:00')); // cancelled appointments do not block
+  });
+
+  test('lists appointments in a time range, ordered by start time', () => {
+    for (const [vehicleId, time] of [['veh-2', '11:00'], ['veh-1', '09:00'], ['veh-3', '14:00']]) {
+      s.book({ dealershipId: 'dlr-hcm', vehicleId, serviceTypeId: 'svc-oil', startAt: at(time) });
+    }
+    assert.deepEqual(s.listAppointments('dlr-hcm').map((a) => a.vehicle.id), ['veh-1', 'veh-2', 'veh-3']);
+    assert.deepEqual(s.listAppointments('dlr-hcm', at('10:00'), at('14:00')).map((a) => a.vehicle.id), ['veh-2']); // to is exclusive
+    assert.equal(s.listAppointments('dlr-hn').length, 0);
+    rejects(() => s.listAppointments('nope'), 'DEALERSHIP_NOT_FOUND');
+  });
+
+  test("lists a dealership's technicians with skills and its bays", () => {
+    const r = s.listResources('dlr-hcm');
+    assert.deepEqual(r.technicians.find((t) => t.id === 'tech-chi')!.skills.sort(), ['EV', 'GENERAL']);
+    assert.deepEqual(r.serviceBays.map((b) => b.id), ['bay-hcm-1', 'bay-hcm-2']);
+    rejects(() => s.listResources('nope'), 'DEALERSHIP_NOT_FOUND');
+  });
+
+  test('cancelling an unknown appointment is a 404', () => {
+    rejects(() => s.cancel('nope'), 'APPOINTMENT_NOT_FOUND');
+  });
+
   test('database triggers block each kind of overlap even if application checks are bypassed', () => {
     // veh-1 oil 09:00-10:00 at dlr-hcm takes tech-an and bay-hcm-1 (first fit).
     s.book({ dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') });
