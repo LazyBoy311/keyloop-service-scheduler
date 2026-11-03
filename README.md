@@ -3,6 +3,7 @@
 
 Keyloop technical assessment, **Scenario A (Ownership)**: a backend service that books dealership service appointments. A booking is confirmed only if a **service bay** and a **technician qualified for the job** are both free for the **entire service duration**.
 
+- Video walkthrough (about 7 minutes): https://youtu.be/CJ0EGraJ7Bw
 - System design: [`docs/system-design.md`](docs/system-design.md)
 - API contract: [`openapi.yaml`](openapi.yaml)
 - Production readiness: what is still missing before go-live, and in what order ([design doc, section 8](docs/system-design.md#8-production-readiness))
