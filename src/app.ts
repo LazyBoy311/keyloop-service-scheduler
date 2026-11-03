@@ -10,6 +10,9 @@ export function buildApp(db: DatabaseSync, opts: FastifyServerOptions & { now?: 
   const { now, ...fastifyOpts } = opts;
   const app = Fastify({
     genReqId: (req) => (req.headers['x-request-id'] as string) || randomUUID(),
+    // Reject unknown fields instead of silently dropping them (Fastify's default), so a client sending
+    // e.g. `technicianId` learns it cannot choose the technician rather than believing it did.
+    ajv: { customOptions: { removeAdditional: false } },
     ...fastifyOpts,
   });
   const scheduler = createScheduler(db, now);

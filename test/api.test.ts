@@ -90,6 +90,63 @@ describe('REST API', () => {
     assert.equal(neverPossible.statusCode, 422);
   });
 
+  test('validates every input at the API boundary', async () => {
+    const valid = { dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') };
+    const cases: [string, Awaited<ReturnType<typeof book>>][] = [
+      ['unknown field', await book({ ...valid, technicianId: 'tech-an' })],
+      ['empty id', await book({ ...valid, vehicleId: '' })],
+      ['no time zone offset', await book({ ...valid, startAt: '2030-03-04T09:00:00' })],
+      ['impossible date', await book({ ...valid, startAt: '2030-02-30T09:00:00+07:00' })],
+      ['idempotency key too long', await book(valid, { 'idempotency-key': 'x'.repeat(201) })],
+    ];
+    for (const [name, res] of cases) {
+      assert.equal(res.statusCode, 400, name);
+      assert.equal(res.json().error.code, 'VALIDATION_ERROR', name);
+    }
+    const noService = await app.inject({ method: 'GET', url: `/dealerships/dlr-hcm/availability?startAt=${encodeURIComponent(at('09:00'))}` });
+    assert.equal(noService.statusCode, 400);
+    const badRange = await app.inject({ method: 'GET', url: '/appointments?dealershipId=dlr-hcm&from=yesterday' });
+    assert.equal(badRange.statusCode, 400);
+    const noDealer = await app.inject({ method: 'GET', url: '/appointments' });
+    assert.equal(noDealer.statusCode, 400);
+  });
+
+  test('maps each business rule to its HTTP status', async () => {
+    const cases: [object, number, string][] = [
+      [{ dealershipId: 'nope', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') }, 404, 'DEALERSHIP_NOT_FOUND'],
+      [{ dealershipId: 'dlr-hcm', vehicleId: 'nope', serviceTypeId: 'svc-oil', startAt: at('09:00') }, 404, 'VEHICLE_NOT_FOUND'],
+      [{ dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'nope', startAt: at('09:00') }, 404, 'SERVICE_TYPE_NOT_FOUND'],
+      [{ dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:10') }, 400, 'INVALID_START_TIME'],
+      [{ dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: '2030-02-28T09:00:00+07:00' }, 400, 'START_TIME_IN_PAST'],
+      [{ dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('16:30') }, 422, 'OUTSIDE_OPENING_HOURS'],
+      [{ dealershipId: 'dlr-hn', vehicleId: 'veh-1', serviceTypeId: 'svc-ev', startAt: at('09:00') }, 422, 'NO_QUALIFIED_TECHNICIAN'],
+    ];
+    for (const [body, status, code] of cases) {
+      const res = await book(body);
+      assert.deepEqual([res.statusCode, res.json().error.code], [status, code]);
+    }
+  });
+
+  test('idempotent replay keeps the Location header; a reused key with another body is 422', async () => {
+    const body = { dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') };
+    const first = await book(body, { 'idempotency-key': 'k' });
+    const replay = await book(body, { 'idempotency-key': 'k' });
+    assert.equal(replay.headers.location, first.headers.location);
+    const reused = await book({ ...body, startAt: at('10:00') }, { 'idempotency-key': 'k' });
+    assert.deepEqual([reused.statusCode, reused.json().error.code], [422, 'IDEMPOTENCY_KEY_REUSED']);
+  });
+
+  test('reference data and resources endpoints', async () => {
+    const get = async (url: string) => (await app.inject({ method: 'GET', url })).json();
+    assert.deepEqual((await get('/dealerships')).map((d: { id: string }) => d.id), ['dlr-hcm', 'dlr-hn']);
+    assert.equal((await get('/service-types')).length, 4);
+    assert.equal((await get('/vehicles')).length, 3);
+    const missing = await app.inject({ method: 'GET', url: '/dealerships/nope/resources' });
+    assert.deepEqual([missing.statusCode, missing.json().error.code], [404, 'DEALERSHIP_NOT_FOUND']);
+    const cancelMissing = await app.inject({ method: 'POST', url: '/appointments/nope/cancel' });
+    assert.equal(cancelMissing.statusCode, 404);
+  });
+
   test('echoes x-request-id and exposes metrics', async () => {
     const res = await app.inject({ method: 'GET', url: '/health', headers: { 'x-request-id': 'trace-123' } });
     assert.equal(res.headers['x-request-id'], 'trace-123');
@@ -101,6 +158,9 @@ describe('REST API', () => {
     await app.inject({ method: 'POST', url: `/appointments/${id}/cancel` });
     assert.match((await app.inject({ method: 'GET', url: '/metrics' })).body, /appointments_cancelled_total 1\n/);
     assert.match(metrics, /http_requests_total\{method="GET",route="\/health",status="200"\} 1/);
+    await book({ dealershipId: 'dlr-hn', vehicleId: 'veh-2', serviceTypeId: 'svc-oil', startAt: at('09:00') });
+    await book({ dealershipId: 'dlr-hn', vehicleId: 'veh-3', serviceTypeId: 'svc-oil', startAt: at('09:00') }); // conflict
+    assert.match((await app.inject({ method: 'GET', url: '/metrics' })).body, /booking_conflicts_total\{code="NO_TECHNICIAN_AVAILABLE"\} 1/);
   });
 });
 
