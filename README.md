@@ -24,8 +24,9 @@ Requirements: **Node.js 22.18+ or 24** (uses the built-in SQLite driver and nati
 
 ```bash
 npm install
-npm test          # 53 tests: business rules, REST API, concurrent booking races, restart
+npm test          # 54 tests: business rules, REST API, concurrent booking races, restart
 npm run coverage  # 100% line, branch and function coverage of src/
+npm run mutation  # breaks 31 pieces of logic one at a time; the tests catch all 31
 npm run typecheck # tsc --noEmit
 npm start         # http://localhost:3000, data in ./data/scheduler.db
 ```
