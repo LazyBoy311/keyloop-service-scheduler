@@ -120,10 +120,35 @@ describe('scheduler', () => {
     assert.equal(s.listAppointments('dlr-hcm').length, 1);
   });
 
+  test('replaying a key after the appointment was cancelled returns the cancelled appointment, not a new booking', () => {
+    const req = { dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') };
+    const { appointment } = s.book(req, 'key-1');
+    s.cancel(appointment.id);
+    const replay = s.book(req, 'key-1');
+    assert.equal(replay.replayed, true);
+    assert.equal(replay.appointment.id, appointment.id);
+    assert.equal(replay.appointment.status, 'CANCELLED');
+    assert.equal(s.listAppointments('dlr-hcm').length, 1);
+  });
+
   test('reusing an idempotency key for a different request is rejected', () => {
     s.book({ dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') }, 'key-1');
     rejects(() => s.book({ dealershipId: 'dlr-hcm', vehicleId: 'veh-3', serviceTypeId: 'svc-oil', startAt: at('11:00') }, 'key-1'),
       'IDEMPOTENCY_KEY_REUSED');
+  });
+
+  test('a start time equal to now is in the past; the next slot is bookable', () => {
+    const clockAt0900 = createScheduler(db, () => Date.parse(at('09:00')));
+    const book = (time: string) => () => clockAt0900.book({ dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at(time) });
+    rejects(book('09:00'), 'START_TIME_IN_PAST');
+    assert.ok(book('09:15')());
+  });
+
+  test('start times must sit exactly on the 15-minute grid, down to the millisecond', () => {
+    const book = (startAt: string) => () => s.book({ dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt });
+    rejects(book('2030-03-04T09:00:30+07:00'), 'INVALID_START_TIME');
+    rejects(book('2030-03-04T09:00:00.500+07:00'), 'INVALID_START_TIME');
+    assert.ok(book('2030-03-04T09:00:00.000+07:00')());
   });
 
   test('opening hours are inclusive at both edges', () => {
