@@ -165,6 +165,13 @@ A rising `booking_conflicts_total{code="NO_TECHNICIAN_AVAILABLE"}` is also a **b
 - Appointment rescheduling. Outbox pattern publishing `AppointmentConfirmed`/`Cancelled` events.
 - AuthN/AuthZ (dealership-scoped roles) and rate limiting.
 
+### Known testing limits
+
+- Concurrency tests run real parallel requests, but the OS decides the exact interleaving, so they show the guarantees hold under load rather than enumerate every ordering. The guarantee itself rests on the write lock and the triggers, not on the tests.
+- The `SLOT_TAKEN` path (a trigger rejecting an insert after the application check passed) cannot be forced without fault injection; the race tests accept it as a valid losing outcome.
+- Overlap triggers guard `INSERT` only. No code path updates an appointment's time today; rescheduling must add matching `BEFORE UPDATE` triggers (or the PostgreSQL `EXCLUDE` constraint, which covers both).
+- The demo UI and Docker image are verified manually, and there is no load test yet (next step: k6 against `POST /appointments`).
+
 ## 9. How GenAI was used in the design phase
 
 > Draft. Edit this section in your own words before submitting; it must describe your real process.

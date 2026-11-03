@@ -22,7 +22,7 @@ Requirements: **Node.js 22.18+ or 24** (uses the built-in SQLite driver and nati
 
 ```bash
 npm install
-npm test          # 44 tests: business rules, REST API, concurrent booking races
+npm test          # 51 tests: business rules, REST API, concurrent booking races, restart
 npm run typecheck # tsc --noEmit
 npm start         # http://localhost:3000, data in ./data/scheduler.db
 ```
@@ -95,9 +95,10 @@ src/
   server.ts      bootstrap + graceful shutdown
 public/index.html  demo UI (test harness for the frontend layer)
 test/
-  scheduler.test.ts  business rules + multi-connection race (worker threads)
-  api.test.ts        HTTP contract via fastify.inject
+  scheduler.test.ts         business rules + multi-connection race (worker threads)
+  api.test.ts               HTTP contract via fastify.inject
   http-concurrency.test.ts  two real server processes on one DB, parallel HTTP requests
+  server-restart.test.ts    data survives a restart, seeding is idempotent
 docs/system-design.md
 openapi.yaml
 ```
