@@ -4,3 +4,6 @@ test
 docs
 *.pdf
 .git
+e2e
+test-results
+playwright-report
