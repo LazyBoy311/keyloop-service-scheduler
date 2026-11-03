@@ -4,6 +4,7 @@ Keyloop technical assessment, **Scenario A (Ownership)**: a backend service that
 
 - System design: [`docs/system-design.md`](docs/system-design.md)
 - API contract: [`openapi.yaml`](openapi.yaml)
+- Production readiness: what is still missing before go-live, and in what order ([design doc, section 8](docs/system-design.md#8-production-readiness))
 - Implemented layer: **backend** (REST API + persistent SQL database). The frontend is stubbed by a minimal demo page (below), the OpenAPI contract, the cURL examples and the API test suite.
 
 ## Demo UI

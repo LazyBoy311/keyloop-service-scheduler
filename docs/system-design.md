@@ -157,13 +157,35 @@ Runtime dependencies: **one** (`fastify`).
 
 A rising `booking_conflicts_total{code="NO_TECHNICIAN_AVAILABLE"}` is also a **business** signal: the dealership needs more technicians with that skill.
 
-## 8. Future work
+## 8. Production readiness
+
+The core is production-grade: booking rules, double-booking protection (lock + triggers + idempotency), input validation, stable error codes, structured logs, metrics, health check, graceful shutdown, persistent storage and a container image. What it is **not** yet, in the order I would address it:
+
+| Priority | Gap | Risk today | Plan |
+|---|---|---|---|
+| **Blocker** | No authentication or authorisation | Anyone can book, cancel any appointment, or read customer names | OAuth2/OIDC at the gateway; roles per dealership (customer, service advisor, admin); customers only see their own vehicles |
+| **Blocker** | No rate limiting | A script can fill a week of slots in seconds | Per-client limits at the gateway, plus a per-customer cap on open bookings |
+| **Blocker** | No schema migrations | `CREATE TABLE IF NOT EXISTS` does not alter existing tables, so the second schema change breaks deployed databases | Versioned migrations (e.g. node-pg-migrate) run before each release |
+| **Blocker** | SQLite is single-host | No multi-host scaling, replicas or point-in-time recovery | PostgreSQL with `EXCLUDE USING gist` constraints (section 4), managed backups |
+| High | One global write lock | All dealerships' bookings are serialised; fine for thousands per day, a bottleneck at hundreds of dealerships | Disappears with PostgreSQL row-level locking and exclusion constraints; partition by `dealership_id` if needed |
+| High | No technician shifts, breaks or leave | Work can be assigned to someone who is off | `technician_availability` table joined into `freeResources` |
+| High | No rescheduling | Cancel-and-rebook can lose the slot to someone else | Atomic `PATCH /appointments/{id}` in one transaction, guarded by `BEFORE UPDATE` triggers / the exclusion constraint |
+| Medium | `GET /appointments` is not paginated | Large dealerships get every row at once | Cursor pagination on `(start_at, id)` |
+| Medium | Idempotency keys never expire and are global | The table grows forever; two clients could collide on a key | Scope keys per client, expire after 24 h |
+| Medium | First-fit allocation | The first technician by id always gets the work | Pick the least-loaded qualified technician for the day |
+| Medium | Fixed UTC offsets | Correct for Vietnam, wrong for DST regions such as the UK | Store an IANA zone per dealership |
+| Medium | Customer names appear in API responses and could reach logs | Personal-data compliance (GDPR, Vietnam Decree 13) | Field-level access by role, log redaction, retention policy |
+| Low | Hand-rolled counters, no latency histograms or tracing | No p95 latency, counters reset on restart | `prom-client` histograms, OpenTelemetry tracing (section 7) |
+| Low | `/health` is a single probe | Kubernetes needs separate liveness and readiness | `/health/live` and `/health/ready` (DB check) |
+| Low | No load test | Throughput limits are estimated, not measured | k6 scenario against `POST /appointments` in CI |
+
+## 9. Future work
+
+Beyond the production gaps above, product features worth adding:
 
 - Suggest the next available slots when a request conflicts.
-- Workload-balanced technician allocation instead of first fit. Bay types (EV lift, alignment bay).
-- Technician shifts, leave and breaks. IANA time zones with DST.
-- Appointment rescheduling. Outbox pattern publishing `AppointmentConfirmed`/`Cancelled` events.
-- AuthN/AuthZ (dealership-scoped roles) and rate limiting.
+- Bay types (EV lift, alignment bay) as a second required capability next to technician skill.
+- Outbox pattern publishing `AppointmentConfirmed`/`Cancelled` events for notifications and DMS sync.
 
 ### Known testing limits
 
@@ -172,7 +194,7 @@ A rising `booking_conflicts_total{code="NO_TECHNICIAN_AVAILABLE"}` is also a **b
 - Overlap triggers guard `INSERT` only. No code path updates an appointment's time today; rescheduling must add matching `BEFORE UPDATE` triggers (or the PostgreSQL `EXCLUDE` constraint, which covers both).
 - The demo UI and Docker image are verified manually, and there is no load test yet (next step: k6 against `POST /appointments`).
 
-## 9. How GenAI was used in the design phase
+## 10. How GenAI was used in the design phase
 
 > Draft. Edit this section in your own words before submitting; it must describe your real process.
 
