@@ -53,6 +53,13 @@ describe('scheduler', () => {
     assert.equal(appointment.technician.id, 'tech-an');
   });
 
+  test('allows an appointment that ends exactly when the next one starts', () => {
+    // Book the later slot first, then one that finishes right as it begins: same technician, bay and vehicle.
+    s.book({ dealershipId: 'dlr-hn', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('10:00') }); // 10:00-11:00
+    const { appointment } = s.book({ dealershipId: 'dlr-hn', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') }); // 09:00-10:00
+    assert.deepEqual([appointment.technician.id, appointment.serviceBay.id], ['tech-dung', 'bay-hn-1']);
+  });
+
   test('rejects when every service bay is occupied even if technicians are free', () => {
     // 3 GENERAL technicians but only 2 bays at dlr-hcm.
     s.book({ dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') });
@@ -208,7 +215,7 @@ describe('scheduler', () => {
       s.book({ dealershipId: 'dlr-hcm', vehicleId, serviceTypeId: 'svc-oil', startAt: at(time) });
     }
     assert.deepEqual(s.listAppointments('dlr-hcm').map((a) => a.vehicle.id), ['veh-1', 'veh-2', 'veh-3']);
-    assert.deepEqual(s.listAppointments('dlr-hcm', at('10:00'), at('14:00')).map((a) => a.vehicle.id), ['veh-2']); // to is exclusive
+    assert.deepEqual(s.listAppointments('dlr-hcm', at('11:00'), at('14:00')).map((a) => a.vehicle.id), ['veh-2']); // from inclusive, to exclusive
     assert.equal(s.listAppointments('dlr-hn').length, 0);
     rejects(() => s.listAppointments('nope'), 'DEALERSHIP_NOT_FOUND');
   });
