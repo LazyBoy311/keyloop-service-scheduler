@@ -1,4 +1,5 @@
 # Unified Service Scheduler
+[![CI](https://github.com/LazyBoy311/keyloop-service-scheduler/actions/workflows/ci.yml/badge.svg)](https://github.com/LazyBoy311/keyloop-service-scheduler/actions/workflows/ci.yml)
 
 Keyloop technical assessment, **Scenario A (Ownership)**: a backend service that books dealership service appointments. A booking is confirmed only if a **service bay** and a **technician qualified for the job** are both free for the **entire service duration**.
 
