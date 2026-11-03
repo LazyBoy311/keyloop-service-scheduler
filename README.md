@@ -16,6 +16,8 @@ Keyloop technical assessment, **Scenario A (Ownership)**: a backend service that
 - see the day's **workshop timeline** per technician and per service bay, with the requested window highlighted, so it is visible *why* a slot was rejected;
 - cancel appointments, and watch the raw API calls in a log panel.
 
+The page is covered by Playwright end-to-end tests (`e2e/booking.spec.ts`): book, conflict with its reason, cancel and rebook, bay exhaustion, never-bookable requests, the API log and a phone-width layout. `npm run test:e2e:demo` runs them in a visible, slowed-down browser.
+
 ![Demo UI](docs/demo-ui.png)
 
 ## Quick start
@@ -27,6 +29,7 @@ npm install
 npm test          # 54 tests: business rules, REST API, concurrent booking races, restart
 npm run coverage  # 100% line, branch and function coverage of src/
 npm run mutation  # breaks 31 pieces of logic one at a time; the tests catch all 31
+npm run test:e2e  # 7 Playwright tests of the demo UI in a real browser (first run: npx playwright install chromium)
 npm run typecheck # tsc --noEmit
 npm start         # http://localhost:3000, data in ./data/scheduler.db
 ```
@@ -103,6 +106,8 @@ test/
   api.test.ts               HTTP contract via fastify.inject
   http-concurrency.test.ts  two real server processes on one DB, parallel HTTP requests
   server-restart.test.ts    data survives a restart, seeding is idempotent
+e2e/booking.spec.ts         Playwright: the demo UI against the real server
+scripts/mutation-test.mjs   mutation testing (npm run mutation)
 docs/system-design.md
 openapi.yaml
 ```

@@ -12,12 +12,15 @@
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
     "typecheck": "tsc",
     "coverage": "node --disable-warning=ExperimentalWarning --test --experimental-test-coverage --test-coverage-include=src/** test/*.test.ts",
-    "mutation": "node scripts/mutation-test.mjs"
+    "mutation": "node scripts/mutation-test.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:demo": "playwright test --headed --workers=1"
   },
   "dependencies": {
     "fastify": "^5.12.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2"
   }
