@@ -9,8 +9,6 @@ export default defineConfig({
   reporter: process.env.CI ? 'github' : 'list',
   use: {
     baseURL: 'http://localhost:3100',
-    // `npm run test:e2e:demo` opens a visible browser and slows each action down so it can be watched or recorded.
-    launchOptions: { slowMo: process.argv.includes('--headed') ? 600 : 0 },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
