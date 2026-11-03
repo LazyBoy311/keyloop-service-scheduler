@@ -2,44 +2,19 @@
 // and receive HTTP requests at the same time. This is the end-to-end proof that the write lock,
 // the triggers and the idempotency check hold across processes, not just inside one.
 import assert from 'node:assert/strict';
-import { type ChildProcess, spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, beforeEach, describe, test } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { openDb, seed } from '../src/db.ts';
+import { type RunningServer, startServer, stopServer } from './fixtures/server.ts';
 
-const root = fileURLToPath(new URL('..', import.meta.url));
 const at = (time: string) => `2030-03-04T${time}:00+07:00`;
-
-function startServer(dbPath: string): Promise<{ url: string; proc: ChildProcess }> {
-  const proc = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'src/server.ts'], {
-    cwd: root,
-    env: { ...process.env, PORT: '0', DB_PATH: dbPath, LOG_LEVEL: 'info' },
-  });
-  return new Promise((resolve, reject) => {
-    let out = '';
-    proc.stdout!.on('data', (chunk) => {
-      out += chunk;
-      const port = out.match(/Server listening at http:\/\/[^"\s]+:(\d+)/)?.[1];
-      if (port) resolve({ url: `http://127.0.0.1:${port}`, proc });
-    });
-    proc.stderr!.on('data', (chunk) => { out += chunk; });
-    proc.once('exit', (code) => reject(new Error(`server exited with ${code}: ${out}`)));
-  });
-}
-
-const stop = (proc: ChildProcess) => new Promise<void>((resolve) => {
-  if (proc.exitCode !== null) return resolve();
-  proc.once('exit', () => resolve());
-  proc.kill();
-});
 
 describe('two server instances sharing one database', () => {
   const dir = mkdtempSync(join(tmpdir(), 'scheduler-http-'));
   const dbPath = join(dir, 'shared.db');
-  let servers: { url: string; proc: ChildProcess }[] = [];
+  let servers: RunningServer[] = [];
 
   before(async () => {
     const db = openDb(dbPath); // create schema once, so the two servers do not race on CREATE TABLE
@@ -49,7 +24,7 @@ describe('two server instances sharing one database', () => {
   });
 
   after(async () => {
-    await Promise.all(servers.map((s) => stop(s.proc)));
+    await Promise.all(servers.map((s) => stopServer(s.proc)));
     rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
