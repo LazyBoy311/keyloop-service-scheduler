@@ -190,7 +190,7 @@ Beyond the production gaps above, product features worth adding:
 ### Known testing limits
 
 - Concurrency tests run real parallel requests, but the OS decides the exact interleaving, so they show the guarantees hold under load rather than enumerate every ordering. The guarantee itself rests on the write lock and the triggers, not on the tests.
-- The `SLOT_TAKEN` path (a trigger rejecting an insert after the application check passed) cannot be forced without fault injection; the race tests accept it as a valid losing outcome.
+- The `SLOT_TAKEN` path (a trigger rejecting an insert after the application check passed) is forced deterministically with fault injection: a test proxies the database and slips a rival booking in just before the `INSERT`.
 - Overlap triggers guard `INSERT` only. No code path updates an appointment's time today; rescheduling must add matching `BEFORE UPDATE` triggers (or the PostgreSQL `EXCLUDE` constraint, which covers both).
 - The demo UI and Docker image are verified manually, and there is no load test yet (next step: k6 against `POST /appointments`).
 

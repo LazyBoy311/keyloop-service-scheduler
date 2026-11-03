@@ -146,6 +146,7 @@ describe('scheduler', () => {
 
   test('start times must sit exactly on the 15-minute grid, down to the millisecond', () => {
     const book = (startAt: string) => () => s.book({ dealershipId: 'dlr-hcm', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt });
+    rejects(book('next tuesday'), 'INVALID_START_TIME'); // the domain validates even without the HTTP schema
     rejects(book('2030-03-04T09:00:30+07:00'), 'INVALID_START_TIME');
     rejects(book('2030-03-04T09:00:00.500+07:00'), 'INVALID_START_TIME');
     assert.ok(book('2030-03-04T09:00:00.000+07:00')());
@@ -219,8 +220,41 @@ describe('scheduler', () => {
     rejects(() => s.listResources('nope'), 'DEALERSHIP_NOT_FOUND');
   });
 
+  test('a technician with no skills yet is listed but never assigned', () => {
+    db.prepare(`INSERT INTO technicians VALUES ('tech-new', 'dlr-hn', 'New Starter')`).run();
+    assert.deepEqual(s.listResources('dlr-hn').technicians.find((t) => t.id === 'tech-new')!.skills, []);
+    s.book({ dealershipId: 'dlr-hn', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') }); // takes tech-dung
+    rejects(() => s.book({ dealershipId: 'dlr-hn', vehicleId: 'veh-2', serviceTypeId: 'svc-oil', startAt: at('09:00') }),
+      'NO_TECHNICIAN_AVAILABLE'); // tech-new is free but not qualified
+  });
+
   test('cancelling an unknown appointment is a 404', () => {
     rejects(() => s.cancel('nope'), 'APPOINTMENT_NOT_FOUND');
+  });
+
+  test('a trigger rejection inside the transaction is rolled back and reported as 409 SLOT_TAKEN', () => {
+    // Fault injection: a rival booking lands between the availability check and our INSERT.
+    let injected = false;
+    const faulty = new Proxy(db, {
+      get(target, prop) {
+        if (prop === 'prepare') {
+          return (sql: string) => {
+            if (!injected && sql.trimStart().startsWith('INSERT INTO appointments')) {
+              injected = true;
+              target.prepare(`INSERT INTO appointments VALUES ('rival', 'dlr-hn', 'cus-2', 'veh-3', 'svc-oil', 'tech-dung', 'bay-hn-1', ?, ?, 'CONFIRMED', NULL, 0, NULL)`)
+                .run(Date.parse(at('09:00')), Date.parse(at('10:00')));
+            }
+            return target.prepare(sql);
+          };
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    rejects(() => createScheduler(faulty, () => NOW).book({ dealershipId: 'dlr-hn', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') }),
+      'SLOT_TAKEN');
+    assert.equal(db.isTransaction, false); // rolled back, connection usable
+    assert.ok(s.book({ dealershipId: 'dlr-hn', vehicleId: 'veh-1', serviceTypeId: 'svc-oil', startAt: at('09:00') }));
   });
 
   test('database triggers block each kind of overlap even if application checks are bypassed', () => {
