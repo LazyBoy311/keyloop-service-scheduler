@@ -124,7 +124,7 @@ The critical race: two advisors book the last free bay at the same moment. Both 
 2. **Database invariant.** `BEFORE INSERT` triggers reject any overlapping confirmed appointment for the same bay, technician or vehicle, even if a future code path forgets the check. In PostgreSQL this becomes `EXCLUDE USING gist (bay_id WITH =, tstzrange(start_at, end_at) WITH &&) WHERE (status = 'CONFIRMED')`, which also lets multiple app instances book in parallel without a global lock.
 3. **Idempotency keys.** A client that times out and retries does not create a second booking. The key is checked inside the locked transaction, and a key reused with a different body is rejected rather than silently returning someone else's booking.
 
-This is verified by a test that starts three worker threads with **separate database connections** that race for the last slot: exactly one wins.
+This is verified at two levels: three worker threads with **separate database connections** race for the last slot (exactly one wins), and two real server processes sharing one database file receive parallel HTTP requests, including the same Idempotency-Key on both instances (one 201, one 200, one appointment).
 
 ## 5. Technology choices
 

@@ -22,7 +22,7 @@ Requirements: **Node.js 22.18+ or 24** (uses the built-in SQLite driver and nati
 
 ```bash
 npm install
-npm test          # 26 tests: business rules, REST API, concurrent booking race
+npm test          # 44 tests: business rules, REST API, concurrent booking races
 npm run typecheck # tsc --noEmit
 npm start         # http://localhost:3000, data in ./data/scheduler.db
 ```
@@ -97,6 +97,7 @@ public/index.html  demo UI (test harness for the frontend layer)
 test/
   scheduler.test.ts  business rules + multi-connection race (worker threads)
   api.test.ts        HTTP contract via fastify.inject
+  http-concurrency.test.ts  two real server processes on one DB, parallel HTTP requests
 docs/system-design.md
 openapi.yaml
 ```
@@ -104,7 +105,7 @@ openapi.yaml
 ## How correctness is guaranteed
 
 - **Entire-duration check.** Overlap uses half-open intervals (`a.start < b.end AND a.end > b.start`), so partial overlaps are rejected and back-to-back bookings are allowed.
-- **No double booking under concurrency.** Check and insert run in one `BEGIN IMMEDIATE` transaction. In addition, database triggers reject any overlapping confirmed appointment for the same bay, technician or vehicle. A test races three worker threads on separate DB connections for the last slot and asserts exactly one wins.
+- **No double booking under concurrency.** Check and insert run in one `BEGIN IMMEDIATE` transaction. In addition, database triggers reject any overlapping confirmed appointment for the same bay, technician or vehicle. A test races three worker threads on separate DB connections for the last slot and asserts exactly one wins. Another starts two real server processes on the same database file and fires parallel HTTP requests at both: the last slot, the bay limit and a retried Idempotency-Key all hold.
 - **Safe retries.** `Idempotency-Key` returns the original appointment instead of booking twice. The key is looked up under the same write lock, so retries racing on separate instances are safe too, and reusing a key for a different request is rejected.
 
 ## AI Collaboration Narrative
